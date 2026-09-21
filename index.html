@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finding Content Gaps with Persistent Homology</title>
+<meta name="description" content="Using topological data analysis and persistent homology to find structurally significant gaps in a content graph, with an interactive Vietoris–Rips demo.">
+<style>
+  :root {
+    --ink: #16213a; --ink-soft: #4b5468; --bg: #fbfaf7; --panel: #ffffff;
+    --border: #e6e2d8; --brand: #1f6f5c; --brand-dark: #164f41;
+    --brand-soft: #e8f2ee; --accent: #d97a3f; --accent-soft: #fbeee2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.65;
+  }
+  a { color: var(--brand); }
+  a:hover { color: var(--brand-dark); }
+  main { padding: 44px 0 70px; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+  .kicker {
+    text-transform: uppercase; letter-spacing: 0.08em; font-size: 12.5px;
+    font-weight: 700; color: var(--brand); margin: 0 0 10px;
+  }
+  h1 { font-size: 34px; line-height: 1.2; margin: 0 0 14px; letter-spacing: -0.01em; }
+  h2 { font-size: 23px; margin: 40px 0 14px; letter-spacing: -0.01em; }
+  h3 { font-size: 18px; margin: 26px 0 10px; }
+  p { margin: 0 0 16px; color: var(--ink); }
+  .lede { font-size: 18px; color: var(--ink-soft); }
+  .meta { color: var(--ink-soft); font-size: 13.5px; margin-bottom: 28px; }
+  ul, ol { padding-left: 22px; }
+  li { margin-bottom: 8px; }
+
+  .demo-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px 26px 28px;
+    margin: 32px 0;
+  }
+  .demo-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 24px; align-items: start; }
+  @media (max-width: 760px) { .demo-grid { grid-template-columns: 1fr; } }
+  .demo-panel svg { width: 100%; height: auto; background: #fbfaf7; border: 1px solid var(--border); border-radius: 10px; }
+  .demo-controls { margin-top: 14px; }
+  .demo-controls input[type="range"] { width: 100%; }
+  .demo-badges { display: flex; gap: 10px; margin: 14px 0; flex-wrap: wrap; }
+  .badge {
+    background: var(--brand-soft);
+    border: 1px solid #cfe4dc;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13.5px;
+  }
+  .badge b { display: block; font-size: 20px; color: var(--brand-dark); }
+  .badge.loop { background: var(--accent-soft); border-color: #eec9a8; }
+  .badge.loop b { color: #8a4a1f; }
+  .chart-label { font-size: 12.5px; color: var(--ink-soft); margin: 4px 0 2px; }
+  .note-box {
+    background: #f4f2ec;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 26px 0;
+    font-size: 14.5px;
+  }
+  .note-box .tag { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin-bottom: 8px; }
+  code { background: #f0ede4; padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+  pre { background: #17223a; color: #dbe3f0; padding: 16px 18px; border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.55; }
+  pre code { background: none; padding: 0; color: inherit; }
+</style>
+</head>
+<body>
+
+<main>
+  <div class="wrap">
+    <p class="kicker">Field notes · content architecture</p>
+    <h1>Finding content gaps with persistent homology, not just keyword clustering</h1>
+    <p class="meta">A method note, with a working demo</p>
+
+    <p class="lede">Most content-cluster maps are built the same way: embed a pile of topics or keywords, run k-means or eyeball a 2D projection, and draw pillar pages around whatever blobs show up. That works for finding clusters. It's much weaker at finding <em>gaps</em> — topics that are clearly implied by everything around them but aren't directly covered by anything. Topological data analysis gives a more principled way to find those gaps, and to tell the real ones from noise.</p>
+
+    <h2>The part standard clustering misses</h2>
+    <p>K-means (and most clustering) answers "which points belong together?" It doesn't naturally answer a different, useful question: "is there a hole in the middle of this structure?" If four topic clusters sit roughly in a ring — each connected to its neighbors, but nothing occupying the center — that center is exactly where a bridge or hub topic belongs. Clustering alone won't surface it, because no single cluster contains it; it's defined by the <em>shape</em> the clusters make together, not by any one cluster's contents.</p>
+
+    <h2>The tool: persistent homology, briefly</h2>
+    <p>Topological data analysis treats a set of points (topics, keywords, anything with a distance between pairs) as a shape to be studied at every scale simultaneously, rather than committing to one clustering threshold up front. The standard construction:</p>
+    <ol>
+      <li><strong>Start with a point cloud</strong> — each point is a topic, positioned so that distance between points reflects dissimilarity (a text-embedding space, for instance).</li>
+      <li><strong>Build a filtration.</strong> For a scale value ε, connect every pair of points within distance ε with an edge, and fill in a triangle wherever all three pairwise distances are within ε. This is the <strong>Vietoris–Rips complex</strong> at scale ε. As ε grows from 0 to ∞, the complex grows with it — more edges, more filled triangles.</li>
+      <li><strong>Track topological features across the whole sweep.</strong> At each ε, count <strong>connected components</strong> (β₀ — how many separate clusters exist right now) and <strong>independent loops</strong> (β₁ — how many "holes" exist that a triangle hasn't filled in). Each feature has a birth scale (when it first appears) and a death scale (when it merges away or gets filled in).</li>
+      <li><strong>Persistence is the signal.</strong> A feature that's born and dies almost immediately is noise — two nearly-identical points, or a stray triangle. A feature that survives across a wide range of ε is structurally real. That's the whole idea: don't pick one threshold, watch what survives <em>most</em> thresholds.</li>
+    </ol>
+    <p>β₀ across the sweep gives you a full hierarchical clustering for free — which topics merge into which pillars, at every granularity, instead of committing to one cluster count. β₁ is the less obvious payoff: a long-lived loop means a set of topics forms a ring with nothing filling its center — a structurally real gap, not just a visually empty patch on a 2D plot.</p>
+
+    <div class="demo-panel">
+      <p class="kicker" style="margin-bottom:2px;">Interactive</p>
+      <h3 style="margin-top:4px;">Drag ε and watch the shape change</h3>
+      <p style="color:var(--ink-soft);font-size:14.5px;">16 points, positioned as a noisy ring — a set of topics that circle around a center nothing here directly addresses. As ε grows, neighboring points connect first; the ring closes into a single component with a hole in the middle before enough chords appear to fill that hole back in.</p>
+
+      <div class="demo-grid">
+        <div>
+          <svg id="rips-svg" viewBox="0 0 600 460" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div class="demo-controls">
+            <input type="range" id="epsilon-slider" min="0" max="100" value="40" step="0.1">
+            <div class="chart-label">ε = <span id="epsilon-value">—</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="demo-badges">
+            <div class="badge"><b id="badge-b0">—</b>connected components (β₀)</div>
+            <div class="badge loop"><b id="badge-b1">—</b>independent loops (β₁)</div>
+          </div>
+          <div class="chart-label">Betti curve — β₀(ε) and β₁(ε) across the full sweep</div>
+          <svg id="betti-svg" viewBox="0 0 300 140" xmlns="http://www.w3.org/2000/svg" style="height:150px;"></svg>
+          <p style="font-size:12.5px;color:var(--ink-soft);margin-top:10px;">Dark line = β₀, orange line = β₁. The vertical marker tracks the slider. Watch β₁ turn on when the ring closes, then off again once enough chords fill it in.</p>
+        </div>
+      </div>
+    </div>
+
+    <h2>Reading the demo as a content decision</h2>
+    <p>Treat each point above as a topic already covered somewhere in a content library. At low ε (a strict similarity threshold), everything is its own island — β₀ is high, nothing is connected, which just means the topics are all somewhat distinct. As ε relaxes, adjacent topics connect first, and the ring closes into one component: β₀ drops to 1, and — critically — β₁ turns on. That's the moment the shape stops being "a bunch of related topics" and becomes "a ring with a hole in it." The hole is a topic that sits conceptually in the center of everything already covered, addressed by none of it directly.</p>
+    <p>Keep relaxing ε and the ring eventually gets chords across it — β₁ drops back to 0. That's the point where the gap stops being real: at a loose enough similarity threshold, everything looks connected to everything, and the "hole" was just an artifact of being too strict. <strong>The gap worth acting on is the one that stays open across a wide band of ε</strong>, not one that appears for a single threshold and vanishes at the next.</p>
+
+    <h2>A real pipeline, not just the toy version</h2>
+    <p>The demo above uses 2D pixel coordinates so the shape is visible. A real pipeline swaps that point cloud for actual content:</p>
+    <pre><code>1. Embed each topic/keyword with a text-embedding model
+   → a vector per topic, distance = semantic dissimilarity
+
+2. Compute the pairwise distance matrix
+
+3. Build the Vietoris–Rips filtration over that distance matrix
+   (ripser, GUDHI, or giotto-tda handle this directly)
+
+4. Compute persistent homology → a persistence diagram
+   - long-lived β0 classes  → natural pillar/cluster boundaries,
+     at whatever granularity you cut the filtration
+   - long-lived β1 classes  → candidate structural gaps —
+     inspect the representative cycle to see which topics
+     ring the hole, and interpret what belongs in the middle
+
+5. Cross-reference candidate gaps against demand data
+   (search volume, ticket volume, whatever signal you have) —
+   topology tells you where structure is, not whether
+   anyone is asking about it</code></pre>
+
+    <div class="note-box">
+      <div class="tag">What this method doesn't do</div>
+      <p style="margin-bottom:8px;">Three honest limits, in the spirit of not overclaiming a technique:</p>
+      <ul style="margin:0;padding-left:20px;">
+        <li><strong>The embedding is a modeling choice, not ground truth.</strong> Different embedding models or distance metrics will surface different topology from the same underlying topics. The output describes the shape of <em>your chosen representation</em>, not some objective structure of the subject matter.</li>
+        <li><strong>A structural gap isn't automatically worth filling.</strong> Persistent homology finds where the shape has a hole. It says nothing about whether anyone searches for what belongs there — that still has to come from demand data, checked separately.</li>
+        <li><strong>The demo above simplifies one thing worth naming directly:</strong> it renders a <em>Betti curve</em> (β₀ and β₁ plotted as step functions across the ε sweep) rather than a full persistence diagram with paired birth/death generators. That's a standard, legitimate simplification — it's derived from the same boundary-matrix computation (rank over GF(2), via <code>β₀ = V − rank(∂₁)</code> and <code>β₁ = E − rank(∂₁) − rank(∂₂)</code>) and gives an honest picture of when features are born and die, just without assigning each individual generator its own tracked lifetime.</li>
+      </ul>
+    </div>
+
+    <p style="margin-top:8px;color:var(--ink-soft);font-size:14px;">Everything on this page runs client-side — the point cloud, the Vietoris–Rips construction, and the boundary-matrix rank computation are plain JavaScript, no library. View source if you want the exact implementation.</p>
+  </div>
+</main>
+
+<script>
+(function () {
+  // ---- Point cloud: a noisy ring of 16 topics ----
+  const N = 16;
+  const CENTER = { x: 300, y: 230 };
+  const BASE_R = 150;
+  const JITTER = [0, 8, -6, 10, -4, 6, -8, 4, 0, -10, 8, -6, 4, -8, 6, -4];
+
+  const points = [];
+  for (let i = 0; i < N; i++) {
+    const angle = (i * 2 * Math.PI) / N;
+    const r = BASE_R + JITTER[i];
+    points.push({
+      id: i,
+      x: CENTER.x + r * Math.cos(angle),
+      y: CENTER.y + r * Math.sin(angle),
+      label: 'Topic ' + (i + 1)
+    });
+  }
+
+  function dist(a, b) {
+    const dx = a.x - b.x, dy = a.y - b.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  const pairDists = [];
+  for (let i = 0; i < N; i++) {
+    for (let j = i + 1; j < N; j++) {
+      pairDists.push({ i, j, d: dist(points[i], points[j]) });
+    }
+  }
+  const maxDist = Math.max.apply(null, pairDists.map(p => p.d));
+
+  // ---- GF(2) linear-basis rank (standard XOR-basis algorithm) ----
+  function highestBit(x) {
+    let b = 0;
+    while (x > 1n) { x >>= 1n; b++; }
+    return b;
+  }
+  function rankGF2(cols) {
+    const pivotByBit = new Map();
+    let rank = 0;
+    for (let col of cols) {
+      let cur = col;
+      while (cur !== 0n) {
+        const hb = highestBit(cur);
+        if (pivotByBit.has(hb)) {
+          cur ^= pivotByBit.get(hb);
+        } else {
+          pivotByBit.set(hb, cur);
+          rank++;
+          break;
+        }
+      }
+    }
+    return rank;
+  }
+
+  // ---- Betti numbers at a given epsilon, via boundary-matrix rank ----
+  function bettiAt(epsilon) {
+    const edges = pairDists.filter(p => p.d <= epsilon);
+    const edgeIndex = new Map();
+    edges.forEach((e, idx) => edgeIndex.set(e.i + '-' + e.j, idx));
+
+    const d1Cols = edges.map(e => (1n << BigInt(e.i)) | (1n << BigInt(e.j)));
+    const rank1 = rankGF2(d1Cols);
+    const b0 = N - rank1;
+
+    // Triangles: all 3-cliques where every pairwise edge is present.
+    let triCount = 0;
+    const d2Cols = [];
+    for (let i = 0; i < N; i++) {
+      for (let j = i + 1; j < N; j++) {
+        if (!edgeIndex.has(i + '-' + j)) continue;
+        for (let k = j + 1; k < N; k++) {
+          const ik = edgeIndex.has(i + '-' + k);
+          const jk = edgeIndex.has(j + '-' + k);
+          if (ik && jk) {
+            triCount++;
+            const eij = edgeIndex.get(i + '-' + j);
+            const eik = edgeIndex.get(i + '-' + k);
+            const ejk = edgeIndex.get(j + '-' + k);
+            d2Cols.push((1n << BigInt(eij)) | (1n << BigInt(eik)) | (1n << BigInt(ejk)));
+          }
+        }
+      }
+    }
+    const rank2 = rankGF2(d2Cols);
+    const b1 = Math.max(0, edges.length - rank1 - rank2);
+
+    return { b0, b1, edges, edgeCount: edges.length, triCount };
+  }
+
+  // ---- Find a good default epsilon: just past when the ring first closes ----
+  const sortedCritical = pairDists.map(p => p.d).sort((a, b) => a - b);
+  let defaultEpsilon = maxDist * 0.4;
+  for (const d of sortedCritical) {
+    if (bettiAt(d).b0 === 1) { defaultEpsilon = d + (maxDist * 0.01); break; }
+  }
+
+  // ---- Render the point cloud + edges ----
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const ripsSvg = document.getElementById('rips-svg');
+
+  function renderRips(epsilon) {
+    while (ripsSvg.firstChild) ripsSvg.removeChild(ripsSvg.firstChild);
+    const { edges } = bettiAt(epsilon);
+
+    edges.forEach(e => {
+      const line = document.createElementNS(svgNS, 'line');
+      line.setAttribute('x1', points[e.i].x);
+      line.setAttribute('y1', points[e.i].y);
+      line.setAttribute('x2', points[e.j].x);
+      line.setAttribute('y2', points[e.j].y);
+      line.setAttribute('stroke', '#1f6f5c');
+      line.setAttribute('stroke-width', '1.5');
+      line.setAttribute('stroke-opacity', '0.55');
+      ripsSvg.appendChild(line);
+    });
+
+    points.forEach(p => {
+      const circle = document.createElementNS(svgNS, 'circle');
+      circle.setAttribute('cx', p.x);
+      circle.setAttribute('cy', p.y);
+      circle.setAttribute('r', 7);
+      circle.setAttribute('fill', '#d97a3f');
+      circle.setAttribute('stroke', '#fff');
+      circle.setAttribute('stroke-width', '1.5');
+      ripsSvg.appendChild(circle);
+
+      const text = document.createElementNS(svgNS, 'text');
+      text.setAttribute('x', p.x);
+      text.setAttribute('y', p.y - 12);
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('font-size', '9.5');
+      text.setAttribute('fill', '#6b7280');
+      text.textContent = p.label;
+      ripsSvg.appendChild(text);
+    });
+  }
+
+  // ---- Precompute + render the Betti curve (step function) ----
+  const bettiSvg = document.getElementById('betti-svg');
+  const curvePoints = sortedCritical.map(d => ({ e: d, ...bettiAt(d) }));
+  const maxB0 = Math.max.apply(null, curvePoints.map(c => c.b0).concat([N]));
+  const maxB1 = Math.max.apply(null, curvePoints.map(c => c.b1).concat([1]));
+  const chartMaxY = Math.max(maxB0, maxB1);
+
+  const CX0 = 10, CX1 = 290, CY0 = 12, CY1 = 118;
+  function ex(e) { return CX0 + (e / maxDist) * (CX1 - CX0); }
+  function ey(v) { return CY1 - (v / chartMaxY) * (CY1 - CY0); }
+
+  function stepPath(key) {
+    let d = 'M ' + ex(0) + ' ' + ey(key === 'b1' ? 0 : N);
+    let prevV = key === 'b1' ? 0 : N;
+    curvePoints.forEach(c => {
+      const v = c[key];
+      d += ' L ' + ex(c.e) + ' ' + ey(prevV);
+      d += ' L ' + ex(c.e) + ' ' + ey(v);
+      prevV = v;
+    });
+    d += ' L ' + ex(maxDist) + ' ' + ey(prevV);
+    return d;
+  }
+
+  function renderBettiChart(epsilon) {
+    while (bettiSvg.firstChild) bettiSvg.removeChild(bettiSvg.firstChild);
+
+    const axis = document.createElementNS(svgNS, 'line');
+    axis.setAttribute('x1', CX0); axis.setAttribute('y1', CY1);
+    axis.setAttribute('x2', CX1); axis.setAttribute('y2', CY1);
+    axis.setAttribute('stroke', '#d8d4c8');
+    bettiSvg.appendChild(axis);
+
+    const b0path = document.createElementNS(svgNS, 'path');
+    b0path.setAttribute('d', stepPath('b0'));
+    b0path.setAttribute('fill', 'none');
+    b0path.setAttribute('stroke', '#16213a');
+    b0path.setAttribute('stroke-width', '2');
+    bettiSvg.appendChild(b0path);
+
+    const b1path = document.createElementNS(svgNS, 'path');
+    b1path.setAttribute('d', stepPath('b1'));
+    b1path.setAttribute('fill', 'none');
+    b1path.setAttribute('stroke', '#d97a3f');
+    b1path.setAttribute('stroke-width', '2');
+    bettiSvg.appendChild(b1path);
+
+    const marker = document.createElementNS(svgNS, 'line');
+    marker.setAttribute('x1', ex(epsilon)); marker.setAttribute('y1', CY0 - 2);
+    marker.setAttribute('x2', ex(epsilon)); marker.setAttribute('y2', CY1 + 2);
+    marker.setAttribute('stroke', '#9aa3b5');
+    marker.setAttribute('stroke-width', '1.5');
+    marker.setAttribute('stroke-dasharray', '3,2');
+    bettiSvg.appendChild(marker);
+  }
+
+  // ---- Wire up the slider ----
+  const slider = document.getElementById('epsilon-slider');
+  slider.min = 0;
+  slider.max = maxDist;
+  slider.step = maxDist / 500;
+  slider.value = defaultEpsilon;
+
+  function update() {
+    const epsilon = parseFloat(slider.value);
+    document.getElementById('epsilon-value').textContent = epsilon.toFixed(1);
+    const { b0, b1 } = bettiAt(epsilon);
+    document.getElementById('badge-b0').textContent = b0;
+    document.getElementById('badge-b1').textContent = b1;
+    renderRips(epsilon);
+    renderBettiChart(epsilon);
+  }
+
+  slider.addEventListener('input', update);
+  update();
+})();
+</script>
+
+</body>
+</html>
